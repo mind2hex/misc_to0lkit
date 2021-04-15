@@ -39,10 +39,13 @@ help(){
     echo "$VERSION"
     echo "usage: ./rfc_page -n 777"
     echo "Options:"
+    echo  "      -h,--help             : Print this help message"    
     echo  "      -n,--numpage <int>    : Number of the rfc      "
     echo  "      -l,--list             : List Downloaded pages  "
     echo  "      --no-less             : Disable less           "
-    echo  "      -h,--help             : Print this help message"
+    echo  "      --clear-db            : deletes all rfc pages downloaded"
+    echo  "      --spanish             : Select spanish server [www.rfc-es.org]     "
+    echo  "      --english             : Select english server [www.rfc-editor.org] default "
     exit 0
 }
 
@@ -63,16 +66,21 @@ argument_parser(){
     while [[ $# -gt 0 ]];do
 	case $1 in
 	    -n|--numpage) RFC=$2 && shift && shift ;;
-	    -l|--list) LISTONLY="TRUE" && shift    ;;
-	    --no-less) NOLESS="TRUE"  && shift          ;;	    
-	    -h|--help) help                        ;;	    
+	    -l|--list) LISTONLY="TRUE"    && shift ;;
+	    --no-less) NOLESS="TRUE"      && shift ;;
+	    --clear-db) DELETE="TRUE"     && shift ;;
+	    --spanish)  SERVER="www.rfc-es.org"     && shift ;;
+	    --english)  SERVER="www.rfc-editor.org" && shift ;;
+	    -h|--help) help                        ;;
 	     *) help                               ;;
 	esac 
     done
 
     ## Setting up default variables
     echo ${LISTONLY:="FALSE"} &>/dev/null 
-    echo ${NOLESS:="FALSE"} &>/dev/null
+    echo ${NOLESS:="FALSE"}   &>/dev/null
+    echo ${DELETE:="FALSE"}   &>/dev/null
+    echo ${SERVER:="www.rfc-editor.org"} &>/dev/null
     
 }
 
@@ -85,7 +93,7 @@ argument_checker(){
     argument_checker_DB
 
     ## If list only is set then return
-    if [[ ${LISTONLY} == "TRUE" ]];then
+    if [[ ${LISTONLY} == "TRUE" || ${DELETE} == "TRUE" ]];then
 	return 0
     fi    
     
@@ -121,7 +129,7 @@ argument_checker_DB(){
 
 argument_checker_connection(){
     ## Using simple ping
-    ping -c 1 rfc-editor.org &>/dev/null
+    ping -c 1 ${SERVER} &>/dev/null
     if [[ $? -ne 0 ]];then
 	ERROR "argument_checker_connection" "Unable to ping server: rfc-editor.org"
     fi
@@ -134,8 +142,14 @@ argument_checker_RFC_page_existence(){
     
     ls $dblocation | grep --word-regexp $RFC &>/dev/null
     if [[ $? -ne 0 ]];then
-	if [[ $(curl --head "https://www.rfc-editor.org/rfc/rfc${RFC}.txt" | grep "Not Found") ]];then
-	    ERROR "argument_checker_RFC_page_existence" "RFC page $RFC not found"
+	if [[ ${SERVER} == "www.rfc-es.org" ]];then
+	    if [[ $(curl --head "https://${SERVER}/rfc/rfc${RFC}-es.txt" | grep "NOt Found") ]];then
+		ERROR "argument_checker_RFC_page_existence" "RFC page $RFC not found, try adding a left padding 0"
+	    fi	    
+	elif [[ ${SERVER} == "www.rfc-editor.org" ]];then
+	    if [[ $(curl --head "https://${SERVER}/rfc/rfc${RFC}.txt" | grep "Not Found") ]];then
+		ERROR "argument_checker_RFC_page_existence" "RFC page $RFC not found"
+	    fi
 	fi
     fi
 }
@@ -145,6 +159,11 @@ argument_checker_RFC_page_existence(){
 #############################
 
 argument_processor(){
+    ## deleteOnly
+    if [[ ${DELETE} == "TRUE" ]];then
+	argument_processor_delete_db
+    fi
+    
     ## ListOnly? ok baby
     if [[ ${LISTONLY} == "TRUE" ]];then
 	argument_processor_list_only
@@ -164,6 +183,17 @@ argument_processor(){
     exit 0
 }
 
+argument_processor_delete_db(){
+    echo "Sure you want to delete all files in ${dblocation} ? [Y/n]"
+    read choice
+    if [[ ${choice} == "Y" ]];then
+	rm -rf ${dblocation}/*
+    fi
+	
+    exit 0
+}
+
+
 argument_processor_list_only(){
     for i in $(ls $dblocation);do
 	echo "==================================================================== $i"
@@ -181,7 +211,13 @@ argument_processor_print_rfc(){
 }
 
 argument_processor_download_rfc(){
-    info=$(GET "https://rfc-editor.org/rfc/rfc${RFC}.txt")
+    # Selecting server
+    if [[ ${SERVER} == "www.rfc-es.org" ]];then
+	info=$(curl "https://${SERVER}/rfc/rfc0${RFC}-es.txt")
+    elif [[ ${SERVER} == "www.rfc-editor.org" ]];then
+	info=$(curl "https://${SERVER}/rfc/rfc${RFC}.txt")
+    fi
+    
     echo "$info" > $dblocation/$RFC
 }
 
@@ -189,3 +225,6 @@ argument_parser "$@"
 argument_checker
 argument_processor
 exit 0
+
+# To fix
+# - When using spanish servers, some special characters are not shown correctly in the terminal
